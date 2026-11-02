@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Khata – Shop Ledger</title>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--tx:#1d1d1b;--mut:#6f6e68;--pri:#0f766e;--pri-tx:#fff;--red:#c2410c;--grn:#15803d;--bd:#e3e1da;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#121211;--card:#1c1c1a;--tx:#f0efe9;--mut:#a09f97;--pri:#2dd4bf;--pri-tx:#06201d;--red:#fb923c;--grn:#4ade80;--bd:#333330}}
+:root[data-theme="dark"]{--bg:#121211;--card:#1c1c1a;--tx:#f0efe9;--mut:#a09f97;--pri:#2dd4bf;--pri-tx:#06201d;--red:#fb923c;--grn:#4ade80;--bd:#333330}
+html{color-scheme:light dark;scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+#app{max-width:720px;margin:0 auto;padding:14px 14px 90px}
+h1{font-size:20px;margin:0}h2{font-size:17px;margin:0}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.mut{color:var(--mut);font-size:13px}
+.tabs{display:flex;gap:6px;margin-bottom:12px}
+.tabs button{flex:1}
+button,.btn{font:inherit;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:10px;padding:9px 12px;cursor:pointer}
+button.pri{background:var(--pri);color:var(--pri-tx);border-color:var(--pri);font-weight:600}
+button.on{border-color:var(--pri);color:var(--pri);font-weight:600}
+button.sm{padding:5px 9px;font-size:13px}
+button.dng{color:var(--red)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;margin-bottom:10px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.big{font-size:22px;font-weight:700}
+.red{color:var(--red)}.grn{color:var(--grn)}
+input,select,textarea{width:100%;font:inherit;padding:9px 10px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);margin:4px 0 8px}
+label{font-size:13px;color:var(--mut)}
+.fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));box-shadow:0 4px 14px rgba(0,0,0,.25);border-radius:999px;padding:12px 18px}
+#modal .ov{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;z-index:20}
+#modal .box{background:var(--card);width:100%;max-width:560px;max-height:92%;overflow:auto;border-radius:18px 18px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom,0px))}
+.line{display:grid;grid-template-columns:1fr 70px auto;gap:6px;align-items:center}
+.line input,.line select{margin:3px 0}
+.tag{font-size:11px;border-radius:6px;padding:1px 6px;border:1px solid var(--bd)}
+.low{color:var(--red);border-color:var(--red)}
+.items{font-size:13px;color:var(--mut);margin-top:4px}
+@media print{.tabs,.fab,button,.top button{display:none!important}body{background:#fff;color:#000}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modal"></div>
+<script>
+const KEY = 'khata_v1';
+let S = load();
+let tab = 'udaar', cid = null, q = '', modal = null, draft = null, mon = new Date().toISOString().slice(0, 7);
+
+function load() {
+  try { const r = window.AndroidDB ? AndroidDB.get() : localStorage.getItem(KEY); if (r) return norm(JSON.parse(r)); } catch (e) {}
+  return norm({ shop: null, items: [], customers: [] });
+}
+function norm(d) { d.items = d.items || []; d.customers = d.customers || []; d.sales = d.sales || []; d.restock = d.restock || []; return d; }
+function save() { try { const j = JSON.stringify(S); if (window.AndroidDB) AndroidDB.set(j); else localStorage.setItem(KEY, j); } catch (e) {} }
+const uid = () => Math.random().toString(36).slice(2, 9);
+const today = () => new Date().toISOString().slice(0, 10);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const money = n => (S.shop ? S.shop.cur : 'Rs') + ' ' + Number(n || 0).toLocaleString();
+const bal = c => c.entries.reduce((s, e) => s + (e.type === 'credit' ? e.amount : -e.amount), 0);
+const cust = id => S.customers.find(c => c.id === id);
+
+function render() {
+  const app = document.getElementById('app');
+  if (!S.shop) {
+    app.innerHTML = `<h1>Set up your shop</h1><p class="mut">Everything is stored on this device. Use Backup in Settings to keep a copy.</p>
+    <div class="card"><label>Shop name</label><input data-f="name" id="sn">
+    <label>Owner name</label><input data-f="owner" id="so">
+    <label>Currency label</label><input data-f="cur" id="sc" value="Rs">
+    <button class="pri" data-act="createShop" style="width:100%">Create shop</button></div>`;
+    return;
+  }
+  let body = '';
+  if (cid && cust(cid)) body = custView(cust(cid));
+  else if (tab === 'udaar') body = udaarView();
+  else if (tab === 'stock') body = stockView();
+  else if (tab === 'rep') body = reportView(); else body = settingsView();
+  app.innerHTML = `<div class="top"><div><h1>${esc(S.shop.name)}</h1><div class="mut">${esc(S.shop.owner)}</div></div><button class="sm" data-act="tab" data-id="set">⚙ Settings</button></div>
+  ${cid ? '' : `<div class="tabs">${[['udaar', 'Udaar'], ['stock', 'Inventory'], ['rep', 'Report']].map(t => `<button class="${tab === t[0] ? 'on' : ''}" data-act="tab" data-id="${t[0]}">${t[1]}</button>`).join('')}</div>`}
+  ${body}`;
+}
+
+function udaarView() {
+  const owed = S.customers.reduce((s, c) => s + Math.max(bal(c), 0), 0);
+  const n = S.customers.filter(c => bal(c) > 0).length;
+  return `<div class="grid"><div class="card"><div class="mut">Total udaar to collect</div><div class="big red">${money(owed)}</div></div>
+  <div class="card"><div class="mut">Customers with dues</div><div class="big">${n}</div></div></div>
+  <input id="q" placeholder="Search customer" value="${esc(q)}" data-search="1">
+  <div id="list">${custList()}</div>
+  <button class="pri fab" data-act="addCust">+ Customer</button>`;
+}
+function custList() {
+  const l = S.customers.filter(c => c.name.toLowerCase().includes(q.toLowerCase()));
+  if (!l.length) return '<p class="mut">No customers yet. Add one to start an udaar book.</p>';
+  return l.map(c => { const b = bal(c); return `<div class="card row" data-act="openCust" data-id="${c.id}" style="cursor:pointer">
+    <div><b>${esc(c.name)}</b><div class="mut">${esc(c.phone || '')}</div></div>
+    <div style="text-align:right"><b class="${b > 0 ? 'red' : 'grn'}">${money(Math.abs(b))}</b><div class="mut">${b > 0 ? 'owes you' : b < 0 ? 'you owe' : 'settled'}</div></div></div>`; }).join('');
+}
+
+function custView(c) {
+  const b = bal(c);
+  const es = c.entries.slice().sort((a, z) => z.date.localeCompare(a.date));
+  return `<div class="row" style="margin-bottom:10px"><button data-act="back">← Back</button>
+  <span><button class="sm" data-act="editCust" data-id="${c.id}">Edit</button> <button class="sm dng" data-act="delCust" data-id="${c.id}">Delete</button> <button class="sm" data-act="print">Print</button></span></div>
+  <div class="card"><h2>${esc(c.name)}</h2><div class="mut">${esc(c.phone || '')}</div>
+  <div class="big ${b > 0 ? 'red' : 'grn'}" style="margin-top:6px">${money(Math.abs(b))} <span class="mut" style="font-size:13px;font-weight:400">${b > 0 ? 'to collect' : b < 0 ? 'advance' : 'settled'}</span></div></div>
+  <div class="grid"><button class="pri" data-act="newEntry" data-id="credit">Gave udaar</button><button data-act="newEntry" data-id="payment">Got payment</button></div>
+  ${es.length ? es.map(e => `<div class="card"><div class="row"><div><b class="${e.type === 'credit' ? 'red' : 'grn'}">${e.type === 'credit' ? '+' : '−'} ${money(e.amount)}</b>
+  <span class="tag">${e.type === 'credit' ? 'udaar' : 'payment'}</span></div><span class="mut">${esc(e.date)}</span></div>
+  ${e.note ? `<div>${esc(e.note)}</div>` : ''}
+  ${e.lines && e.lines.length ? `<div class="items">${e.lines.map(l => `${esc(l.name)} × ${l.qty} @ ${money(l.price)}`).join('<br>')}</div>` : ''}
+  <div style="margin-top:8px"><button class="sm" data-act="editEntry" data-id="${e.id}">Edit</button> <button class="sm dng" data-act="delEntry" data-id="${e.id}">Delete</button></div></div>`).join('') : '<p class="mut">No entries yet.</p>'}`;
+}
+
+function stockView() {
+  const val = S.items.reduce((s, i) => s + i.price * i.stock, 0);
+  return `<div class="grid"><div class="card"><div class="mut">Items</div><div class="big">${S.items.length}</div></div>
+  <div class="card"><div class="mut">Stock value (sale price)</div><div class="big">${money(val)}</div></div></div>
+  ${S.items.length ? S.items.map(i => `<div class="card row"><div><b>${esc(i.name)}</b> ${i.stock <= 5 ? '<span class="tag low">low stock</span>' : ''}
+  <div class="mut">Cost ${money(i.cost)} · Sale ${money(i.price)} / ${esc(i.unit || 'pc')}</div><div class="mut">Profit ${money(i.price - (i.cost || 0))} per ${esc(i.unit || 'pc')} · ${i.stock} in stock</div></div>
+  <div style="display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;max-width:160px"><button class="sm pri" data-act="sell" data-id="${i.id}">Sell</button><button class="sm" data-act="restock" data-id="${i.id}">+ Stock</button><button class="sm" data-act="editItem" data-id="${i.id}">Edit</button><button class="sm dng" data-act="delItem" data-id="${i.id}">Delete</button></div></div>`).join('') : '<p class="mut">No items yet. Add what you sell.</p>'}
+  <button class="pri fab" data-act="addItem">+ Item</button>`;
+}
+
+function reportView() {
+  const inM = d => (d || '').slice(0, 7) === mon;
+  const rows = {};
+  const get = n => rows[n] || (rows[n] = { name: n, bought: 0, bc: 0, sold: 0, rev: 0, cost: 0 });
+  let credProfit = 0;
+  S.restock.filter(r => inM(r.date)).forEach(r => { const x = get(r.name); x.bought += r.qty; x.bc += r.qty * r.cost; });
+  S.sales.filter(s => inM(s.date)).forEach(s => { const x = get(s.name); x.sold += s.qty; x.rev += s.qty * s.price; x.cost += s.qty * s.cost; });
+  S.customers.forEach(c => c.entries.filter(e => e.type === 'credit' && inM(e.date)).forEach(e => (e.lines || []).forEach(l => {
+    const x = get(l.name); x.sold += l.qty; x.rev += l.qty * l.price; x.cost += l.qty * (l.cost || 0); credProfit += l.qty * (l.price - (l.cost || 0));
+  })));
+  const list = Object.values(rows).sort((a, b) => (b.rev - b.cost) - (a.rev - a.cost));
+  const T = list.reduce((a, x) => ({ bought: a.bought + x.bought, bc: a.bc + x.bc, sold: a.sold + x.sold, rev: a.rev + x.rev, cost: a.cost + x.cost }), { bought: 0, bc: 0, sold: 0, rev: 0, cost: 0 });
+  const profit = T.rev - T.cost;
+  const recs = S.sales.filter(s => inM(s.date)).map(s => Object.assign({ k: 's' }, s)).concat(S.restock.filter(r => inM(r.date)).map(r => Object.assign({ k: 'r' }, r))).sort((a, b) => b.date.localeCompare(a.date));
+  return `<label>Month</label><input type="month" data-mon="1" value="${mon}">
+  <div class="grid"><div class="card"><div class="mut">Stocked in (qty)</div><div class="big">${+T.bought.toFixed(2)}</div><div class="mut">cost ${money(T.bc)}</div></div>
+  <div class="card"><div class="mut">Sold (qty)</div><div class="big">${+T.sold.toFixed(2)}</div><div class="mut">sales ${money(T.rev)}</div></div></div>
+  <div class="card"><div class="mut">Profit this month</div><div class="big ${profit >= 0 ? 'grn' : 'red'}">${money(profit)}</div>
+  <div class="mut">Cost of items sold ${money(T.cost)} · of this profit ${money(credProfit)} is still on udaar</div></div>
+  <h2 style="margin:12px 0 6px">By item</h2>
+  ${list.length ? `<div class="card" style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px"><tr class="mut"><td>Item</td><td>In</td><td>Sold</td><td>Profit</td></tr>${list.map(x => `<tr><td>${esc(x.name)}</td><td>${+x.bought.toFixed(2)}</td><td>${+x.sold.toFixed(2)}</td><td class="${x.rev - x.cost >= 0 ? 'grn' : 'red'}">${money(x.rev - x.cost)}</td></tr>`).join('')}</table></div>` : '<p class="mut">No stock or sales recorded this month.</p>'}
+  <h2 style="margin:12px 0 6px">Records</h2><p class="mut">Cash sales and stock added. Credit sales are in the customer udaar books.</p>
+  ${recs.map(r => `<div class="card row"><div>${r.k === 's' ? 'Sold' : 'Stocked'} ${r.qty} × ${esc(r.name)}<div class="mut">${r.date} · ${r.k === 's' ? money(r.qty * r.price) + ' (profit ' + money(r.qty * (r.price - r.cost)) + ')' : 'cost ' + money(r.qty * r.cost)}</div></div><button class="sm dng" data-act="delRec" data-id="${r.k}:${r.id}">Delete</button></div>`).join('')}`;
+}
+
+function settingsView() {
+  return `<div class="card"><h2>Shop</h2><label>Shop name</label><input data-s="name" value="${esc(S.shop.name)}">
+  <label>Owner</label><input data-s="owner" value="${esc(S.shop.owner)}"><label>Currency label</label><input data-s="cur" value="${esc(S.shop.cur)}"></div>
+  <div class="card"><h2>Backup</h2><p class="mut">Copy your data as text and keep it safe, or paste a backup to restore.</p><button data-act="backup">Backup / restore</button></div>
+  <div class="card"><h2>Danger zone</h2><button class="dng" data-act="reset">Erase all data</button></div>`;
+}
+
+/* ---------- modals ---------- */
+function calc(d) {
+  if (d.type === 'credit' && d.lines.length) return d.lines.reduce((s, l) => s + (+l.price || 0) * (+l.qty || 0), 0);
+  return +d.amount || 0;
+}
+function modalView() {
+  const el = document.getElementById('modal');
+  if (!modal) { el.innerHTML = ''; return; }
+  let h = '';
+  if (modal === 'cust') h = `<h2>${draft.id ? 'Edit' : 'New'} customer</h2><label>Name</label><input data-f="name" value="${esc(draft.name)}"><label>Phone</label><input data-f="phone" value="${esc(draft.phone)}">`;
+  if (modal === 'item') h = `<h2>${draft.id ? 'Edit' : 'New'} item</h2><label>Name</label><input data-f="name" value="${esc(draft.name)}">
+    <label>Cost price (purchase, per unit)</label><input type="number" inputmode="decimal" data-f="cost" value="${draft.cost}"><label>Sale price (per unit)</label><input type="number" inputmode="decimal" data-f="price" value="${draft.price}"><label>Stock quantity</label><input type="number" inputmode="decimal" data-f="stock" value="${draft.stock}">
+    <label>Unit</label><select data-f="unit">${['kg', 'dozen', 'unit'].concat(!draft.unit || ['kg', 'dozen', 'unit'].includes(draft.unit) ? [] : [draft.unit]).map(u => `<option ${u === draft.unit ? 'selected' : ''}>${esc(u)}</option>`).join('')}</select>`;
+  if (modal === 'entry') {
+    h = `<h2>${draft.type === 'credit' ? 'Give udaar' : 'Receive payment'}</h2><label>Date</label><input type="date" data-f="date" value="${draft.date}">
+    <label>Note</label><input data-f="note" value="${esc(draft.note)}">`;
+    if (draft.type === 'credit') {
+      h += `<label>Items taken on credit</label>` + draft.lines.map((l, i) => `<div class="line"><select data-l="${i}" data-k="itemId"><option value="">Pick item</option>${S.items.map(it => `<option value="${it.id}" ${it.id === l.itemId ? 'selected' : ''}>${esc(it.name)} (${it.stock})</option>`).join('')}${l.itemId && !S.items.find(it => it.id === l.itemId) ? `<option value="${l.itemId}" selected>${esc(l.name)}</option>` : ''}</select>
+      <input type="number" inputmode="decimal" data-l="${i}" data-k="qty" value="${l.qty}"><button class="sm dng" data-act="rmLine" data-id="${i}">✕</button></div>`).join('') +
+        `<button class="sm" data-act="addLine">+ Add item</button>`;
+    }
+    h += `<label style="display:block;margin-top:8px">${draft.type === 'credit' ? 'Amount (used when no items are picked)' : 'Amount received'}</label><input type="number" inputmode="decimal" data-f="amount" value="${draft.amount}">
+    <div class="big" style="margin:4px 0 8px">Total: <span id="tot">${money(calc(draft))}</span></div>`;
+  }
+  if (modal === 'sell' || modal === 'restock') h = `<h2>${modal === 'sell' ? 'Sell' : 'Add stock'}: ${esc(draft.name)}</h2><label>Date</label><input type="date" data-f="date" value="${draft.date}"><label>Quantity</label><input type="number" inputmode="decimal" data-f="qty" value="${draft.qty}">` + (modal === 'sell' ? `<label>Sale price (per unit)</label><input type="number" inputmode="decimal" data-f="price" value="${draft.price}">` : `<label>Cost price (per unit)</label><input type="number" inputmode="decimal" data-f="cost" value="${draft.cost}">`);
+  if (modal === 'backup') h = `<h2>Backup / restore</h2><p class="mut">Copy this text to back up. To restore, replace it with a backup and press Restore.</p>
+    <textarea id="bk" rows="8">${esc(JSON.stringify(S))}</textarea><button data-act="restore">Restore from text</button> `;
+  el.innerHTML = `<div class="ov" data-act="close"><div class="box" data-stop="1">${h}
+    <div class="row" style="margin-top:10px"><button data-act="close">Close</button>${modal === 'backup' ? '' : '<button class="pri" data-act="saveModal">Save</button>'}</div></div></div>`;
+}
+function open(k, d) { modal = k; draft = d; modalView(); }
+function close() { modal = null; draft = null; modalView(); }
+function applyStock(e, dir) {
+  (e.lines || []).forEach(l => { const it = S.items.find(i => i.id === l.itemId); if (it) it.stock = +(it.stock - dir * l.qty).toFixed(3); });
+}
+
+/* ---------- events ---------- */
+document.addEventListener('input', ev => {
+  const t = ev.target;
+  if (t.dataset.mon) { mon = t.value || mon; render(); return; }
+  if (t.dataset.search) { q = t.value; document.getElementById('list').innerHTML = custList(); return; }
+  if (t.dataset.s) { S.shop[t.dataset.s] = t.value; save(); return; }
+  if (!draft) return;
+  if (t.dataset.f) draft[t.dataset.f] = t.value;
+  if (t.dataset.l != null) {
+    const l = draft.lines[+t.dataset.l]; l[t.dataset.k] = t.value;
+    if (t.dataset.k === 'itemId') { const it = S.items.find(i => i.id === t.value); if (it) { l.name = it.name; l.price = it.price; l.cost = it.cost || 0; } }
+  }
+  const tot = document.getElementById('tot'); if (tot) tot.textContent = money(calc(draft));
+});
+
+document.addEventListener('click', ev => {
+  const el = ev.target.closest('[data-act]');
+  if (!el) return;
+  if (el.classList.contains('ov') && ev.target !== el) return;
+  const a = el.dataset.act, id = el.dataset.id;
+  const acts = {
+    createShop() {
+      const n = document.getElementById('sn').value.trim();
+      if (!n) return alert('Enter a shop name');
+      S.shop = { name: n, owner: document.getElementById('so').value.trim(), cur: document.getElementById('sc').value.trim() || 'Rs' };
+      save();
+    },
+    tab() { tab = id; cid = null; },
+    openCust() { cid = id; },
+    back() { cid = null; },
+    addCust() { open('cust', { name: '', phone: '' }); },
+    editCust() { open('cust', Object.assign({}, cust(id))); },
+    delCust() { if (confirm('Delete this customer and all their udaar entries?')) { S.customers = S.customers.filter(c => c.id !== id); cid = null; save(); } },
+    newEntry() { open('entry', { type: id, date: today(), note: '', amount: '', lines: [] }); },
+    editEntry() { const e = cust(cid).entries.find(x => x.id === id); open('entry', JSON.parse(JSON.stringify(e))); },
+    delEntry() {
+      if (!confirm('Delete this entry?')) return;
+      const c = cust(cid), e = c.entries.find(x => x.id === id);
+      if (e.type === 'credit') applyStock(e, -1);
+      c.entries = c.entries.filter(x => x.id !== id); save();
+    },
+    addLine() { draft.lines.push({ itemId: '', name: '', price: 0, qty: 1 }); modalView(); return 'keep'; },
+    rmLine() { draft.lines.splice(+id, 1); modalView(); return 'keep'; },
+    addItem() { open('item', { name: '', cost: '', price: '', stock: '', unit: 'unit' }); },
+    sell() { const it = S.items.find(i => i.id === id); open('sell', { itemId: id, name: it.name, date: today(), qty: '', price: it.price }); },
+    restock() { const it = S.items.find(i => i.id === id); open('restock', { itemId: id, name: it.name, date: today(), qty: '', cost: it.cost || '' }); },
+    delRec() {
+      const p = id.split(':'), isS = p[0] === 's';
+      if (!confirm('Delete this record? Stock will be adjusted back.')) return 'keep';
+      const r = (isS ? S.sales : S.restock).find(x => x.id === p[1]), it = S.items.find(i => i.id === r.itemId);
+      if (it) it.stock = +(it.stock + (isS ? r.qty : -r.qty)).toFixed(3);
+      if (isS) S.sales = S.sales.filter(x => x.id !== p[1]); else S.restock = S.restock.filter(x => x.id !== p[1]);
+      save();
+    },
+    editItem() { open('item', Object.assign({ cost: 0 }, S.items.find(i => i.id === id))); },
+    delItem() { if (confirm('Delete this item?')) { S.items = S.items.filter(i => i.id !== id); save(); } },
+    backup() { open('backup', {}); },
+    restore() {
+      try { const d = JSON.parse(document.getElementById('bk').value); if (!d.customers || !d.items) throw 0; S = norm(d); save(); close(); }
+      catch (e) { alert('That text is not a valid backup'); return 'keep'; }
+    },
+    reset() { if (confirm('Erase everything on this device?')) { S = norm({ shop: null, items: [], customers: [] }); cid = null; save(); } },
+    print() { try { window.print(); } catch (e) {} return 'keep'; },
+    close() { close(); return 'keep'; },
+    saveModal() { return saveModal(); }
+  };
+  if (!acts[a]) return;
+  const r = acts[a]();
+  if (r !== 'keep') render();
+});
+
+function saveModal() {
+  if (modal === 'cust') {
+    if (!draft.name.trim()) { alert('Enter a name'); return 'keep'; }
+    if (draft.id) { const c = cust(draft.id); c.name = draft.name.trim(); c.phone = draft.phone; }
+    else S.customers.push({ id: uid(), name: draft.name.trim(), phone: draft.phone, entries: [] });
+  } else if (modal === 'item') {
+    if (!draft.name.trim()) { alert('Enter an item name'); return 'keep'; }
+    const o = { name: draft.name.trim(), cost: +draft.cost || 0, price: +draft.price || 0, stock: +draft.stock || 0, unit: draft.unit || 'unit' };
+    if (draft.id) Object.assign(S.items.find(i => i.id === draft.id), o); else { const it = Object.assign({ id: uid() }, o); S.items.push(it); if (it.stock > 0) S.restock.push({ id: uid(), date: today(), itemId: it.id, name: it.name, qty: it.stock, cost: it.cost }); }
+  } else if (modal === 'sell' || modal === 'restock') {
+    const it = S.items.find(i => i.id === draft.itemId), qty = +draft.qty;
+    if (!(qty > 0)) { alert('Enter a quantity'); return 'keep'; }
+    if (modal === 'sell') { S.sales.push({ id: uid(), date: draft.date || today(), itemId: it.id, name: it.name, qty, price: +draft.price || 0, cost: it.cost || 0 }); it.stock = +(it.stock - qty).toFixed(3); }
+    else { const c = draft.cost === '' ? (it.cost || 0) : +draft.cost; S.restock.push({ id: uid(), date: draft.date || today(), itemId: it.id, name: it.name, qty, cost: c }); it.stock = +(it.stock + qty).toFixed(3); it.cost = c; }
+  } else if (modal === 'entry') {
+    const lines = draft.type === 'credit' ? draft.lines.filter(l => l.itemId && +l.qty > 0).map(l => ({ itemId: l.itemId, name: l.name, price: +l.price, cost: +l.cost || 0, qty: +l.qty })) : [];
+    const amount = lines.length ? lines.reduce((s, l) => s + l.price * l.qty, 0) : +draft.amount || 0;
+    if (amount <= 0) { alert('Enter an amount or pick items'); return 'keep'; }
+    const c = cust(cid);
+    const e = { id: draft.id || uid(), type: draft.type, date: draft.date || today(), note: draft.note, amount, lines };
+    if (draft.id) { const old = c.entries.find(x => x.id === draft.id); if (old.type === 'credit') applyStock(old, -1); c.entries = c.entries.filter(x => x.id !== draft.id); }
+    if (e.type === 'credit') applyStock(e, 1);
+    c.entries.push(e);
+  }
+  save(); close();
+}
+
+render();
+</script>
+</body>
+</html>
